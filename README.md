@@ -1,58 +1,44 @@
-# Real-Time Solar Inverter Monitoring System
+# AI-Powered Solar Inverter Monitoring & Failure Prediction System
 
-A complete full-stack solution for monitoring solar inverter telemetry, featuring a real-time React dashboard, FastAPI backend, Scikit-Learn based Machine Learning Anomaly Detection, and Generative AI suggestions using Google Gemini.
+An industrial-grade monitoring platform that predicts inverter health, power output, and efficiency using dual-mode Machine Learning (Internal & Combined) and Generative AI for diagnostics.
 
-## 🛠 Tech Stack
+## Features
+- **Dual ML Models**: Switches between Internal-only and Combined (Internal + External) models based on data availability.
+- **Regression Analysis**: predicts future power output and efficiency trends.
+- **Anomaly Detection**: Real-time identification of abnormal behavior using Isolation Forest.
+- **7-Day Risk Prediction**: Probability of failure within the next week.
+- **GenAI Root Cause Analysis**: Automated diagnostics and maintenance recommendations using Google Gemini.
+- **Interactive Dashboard**: Modern glassmorphism UI with real-time charts and model selection toggles.
 
-- **Backend**: Python, FastAPI, SQLAlchemy (configurable for PostgreSQL/SQLite)
-- **Frontend**: React.js (Vite), Recharts, Vanilla CSS (Premium Dark Mode)
-- **Machine Learning**: Scikit-Learn (`IsolationForest`) for anomaly detection
-- **AI Analytics**: Google Generative AI (Gemini 1.5 Flash)
-- **Streaming**: WebSockets for live live updates
-- **Deployment Ready**: Fully configured for local runs and Google Colab (`ngrok` integration).
+## Tech Stack
+- **Backend**: FastAPI, SQLAlchemy, PostgreSQL, Scikit-Learn
+- **Frontend**: React (Vite), Recharts, Lucide Icons
+- **AI**: Google Gemini API
+- **Deployment**: Docker, Docker Compose
 
-## 🚀 Getting Started Locally
+## Getting Started
 
-### 1. Setup Backend
-1. Open a terminal in the `backend/` folder.
-2. Create and activate a virtual environment:
+### Prerequisites
+- Docker & Docker Compose
+- Google Gemini API Key
+
+### Setup
+1. Clone the repository.
+2. Copy `.env.example` to `.env` and add your `GEMINI_API_KEY`.
+3. Run the following command:
    ```bash
-   python -m venv venv
-   # Windows:
-   .\venv\Scripts\activate
-   # Mac/Linux:
-   source venv/bin/activate
+   docker-compose up --build
    ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Set up the environment variables:
-   - Edit `backend/.env` to include your `GEMINI_API_KEY` and your `DATABASE_URL` (if you want to use PostgreSQL instead of the default SQLite).
-5. Start the FastAPI server:
-   ```bash
-   uvicorn main:app --reload
-   ```
+4. Access the dashboard at `http://localhost`.
 
-### 2. Setup Frontend
-1. Open a terminal in the `frontend/` folder.
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the development server:
-   ```bash
-   npm run dev
-   ```
-4. Open your browser to `http://localhost:5173`.
+## API Documentation
+- `POST /api/inverter/telemetry`: Send real-time data for analysis.
+- `GET /api/predict`: Get latest predictions for a MAC address.
+- `GET /api/alerts`: List active system anomalies and warnings.
+- `POST /api/ml/train`: Trigger model retraining using local CSV data.
 
-### 3. Generate Mock Data & Simulation
-By default, the dashboard polls the `/api/simulator/generate` endpoint every 5 seconds, which dynamically adds new telemetry records to the database and streams them to the dashboard, testing both REST APIs and real-time frontend charts.
-
-## 📓 Google Colab Integration
-
-If you want to run the backend and ML training in Google Colab:
-1. Upload the `notebooks/Colab_Solar_Monitoring.ipynb` notebook to Google Colab.
-2. Upload the `data/generate_mock_csv.py` to Colab and run it to get historical datasets.
-3. The Notebook demonstrates loading CSVs, training `IsolationForest`, and launching the FastAPI server directly inside Colab via `pyngrok`.
-4. Grab the generated `ngrok` URL from the Notebook output and paste it into your `frontend/src/api.js` for the frontend to connect remotely to Colab!
+## Project Structure
+- `backend/`: FastAPI server and ML services.
+- `frontend/`: React dashboard.
+- `notebooks/`: Colab-ready training scripts.
+- `csv_files/`: Training data and history.

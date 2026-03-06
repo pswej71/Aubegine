@@ -1,0 +1,103 @@
+
+Analyzing d:\Aubegine\csv_files\Copy of 54-10-EC-8C-14-69.raws.csv...
+Total columns: 71
+Column Names: ['_id', 'mac', 'timestamp', 'inverters[0].alarm_code', 'inverters[0].op_state', 'inverters[0].pv2_current', 'inverters[0].pv2_power', 'inverters[0].pv2_voltage', 'inverters[0].pv1_current', 'inverters[0].pv1_power', 'inverters[0].pv1_voltage', 'inverters[0].kwh_midnight', 'inverters[0].kwh_total', 'inverters[0].kwh_today', 'inverters[0].id', 'inverters[0].power', 'meters[0].meter_kwh_today', 'meters[0].base_meter_kwh_import', 'meters[0].base_meter_kwh_total', 'meters[0].original_meter_kwh_import', 'meters[0].original_meter_kwh_total', 'meters[0].pf', 'meters[0].freq', 'meters[0].p_b', 'meters[0].p_y', 'meters[0].p_r', 'meters[0].v_b', 'meters[0].v_y', 'meters[0].v_r', 'meters[0].meter_active_power', 'meters[0].meter_kwh_import', 'meters[0].meter_kwh_total', 'meters[0].model', 'meters[0].serial', 'meters[0].id', 'sensors[0].ambient_temp', 'createdAt', 'timestampDate', 'fromServer', 'dataLoggerModelId', '__v', 'inverters[0].temp', 'inverters[0].limit_percent', 'inverters[0].model', 'inverters[0].serial', 'smu[0].string14', 'smu[0].string13', 'smu[0].string12', 'smu[0].string11', 'smu[0].string10', 'smu[0].string9', 'smu[0].string8', 'smu[0].string7', 'smu[0].string6', 'smu[0].string5', 'smu[0].string4', 'smu[0].string3', 'smu[0].string2', 'smu[0].string1', 'smu[0].id', 'batteries', 'grid_master', 'inverters[0].pv2_curr', 'inverters[0].string9', 'inverters[0].string10', 'inverters[0].string11', 'inverters[0].string12', 'inverters[0].string13', 'inverters[0].string14', 'meters[0].meter_reactive_power', 'meters[0].meter_apparent_power']
+
+First row sample:
+_id                                    65e11169924efebd78d277f7
+mac                                           54-10-EC-8C-14-69
+timestamp                                         1709268605000
+inverters[0].alarm_code                                     100
+inverters[0].op_state                                         0
+inverters[0].pv2_current                                      0
+inverters[0].pv2_power                                        0
+inverters[0].pv2_voltage                                      0
+inverters[0].pv1_current                                      0
+inverters[0].pv1_power                                        0
+inverters[0].pv1_voltage                                      0
+inverters[0].kwh_midnight                              497430.0
+inverters[0].kwh_total                                 497430.0
+inverters[0].kwh_today                                        0
+inverters[0].id                                               1
+inverters[0].power                                            0
+meters[0].meter_kwh_today                                   NaN
+meters[0].base_meter_kwh_import                            1342
+meters[0].base_meter_kwh_total                           485857
+meters[0].original_meter_kwh_import                        1342
+meters[0].original_meter_kwh_total                       485857
+meters[0].pf                                              0.018
+meters[0].freq                                        49.983002
+meters[0].p_b                                           -0.0073
+meters[0].p_y                                           -0.0106
+meters[0].p_r                                            0.0022
+meters[0].v_b                                        243.911774
+meters[0].v_y                                        246.123825
+meters[0].v_r                                        246.304886
+meters[0].meter_active_power                               -0.0
+meters[0].meter_kwh_import                                 1342
+meters[0].meter_kwh_total                                485857
+meters[0].model                                    ELITE440-444
+meters[0].serial                                       MSP53486
+meters[0].id                                                 10
+sensors[0].ambient_temp                                       0
+createdAt                                         1709248873499
+timestampDate                          2024-03-01T04:50:05.000Z
+fromServer                                      raw_server_prod
+dataLoggerModelId                      6181191af5edff65a9e81a8e
+__v                                                           0
+inverters[0].temp                                           NaN
+inverters[0].limit_percent                                  NaN
+inverters[0].model                                          NaN
+inverters[0].serial                                         NaN
+smu[0].string14                                             NaN
+smu[0].string13                                             NaN
+smu[0].string12                                             NaN
+smu[0].string11                                             NaN
+smu[0].string10                                             NaN
+smu[0].string9                                              NaN
+smu[0].string8                                              NaN
+smu[0].string7                                              NaN
+smu[0].string6                                              NaN
+smu[0].string5                                              NaN
+smu[0].string4                                              NaN
+smu[0].string3                                              NaN
+smu[0].string2                                              NaN
+smu[0].string1                                              NaN
+smu[0].id                                                   NaN
+batteries                                                   NaN
+grid_master                                                 NaN
+inverters[0].pv2_curr                                       NaN
+inverters[0].string9                                        NaN
+inverters[0].string10                                       NaN
+inverters[0].string11                                       NaN
+inverters[0].string12                                       NaN
+inverters[0].string13                                       NaN
+inverters[0].string14                                       NaN
+meters[0].meter_reactive_power                              NaN
+meters[0].meter_apparent_power                              NaN
+
+Numeric columns count: 64
+Numeric columns: ['timestamp', 'inverters[0].alarm_code', 'inverters[0].op_state', 'inverters[0].pv2_current', 'inverters[0].pv2_power', 'inverters[0].pv2_voltage', 'inverters[0].pv1_current', 'inverters[0].pv1_power', 'inverters[0].pv1_voltage', 'inverters[0].kwh_midnight', 'inverters[0].kwh_total', 'inverters[0].kwh_today', 'inverters[0].id', 'inverters[0].power', 'meters[0].meter_kwh_today', 'meters[0].base_meter_kwh_import', 'meters[0].base_meter_kwh_total', 'meters[0].original_meter_kwh_import', 'meters[0].original_meter_kwh_total', 'meters[0].pf', 'meters[0].freq', 'meters[0].p_b', 'meters[0].p_y', 'meters[0].p_r', 'meters[0].v_b', 'meters[0].v_y', 'meters[0].v_r', 'meters[0].meter_active_power', 'meters[0].meter_kwh_import', 'meters[0].meter_kwh_total', 'meters[0].id', 'sensors[0].ambient_temp', 'createdAt', '__v', 'inverters[0].temp', 'inverters[0].limit_percent', 'inverters[0].model', 'inverters[0].serial', 'smu[0].string14', 'smu[0].string13', 'smu[0].string12', 'smu[0].string11', 'smu[0].string10', 'smu[0].string9', 'smu[0].string8', 'smu[0].string7', 'smu[0].string6', 'smu[0].string5', 'smu[0].string4', 'smu[0].string3', 'smu[0].string2', 'smu[0].string1', 'smu[0].id', 'batteries', 'grid_master', 'inverters[0].pv2_curr', 'inverters[0].string9', 'inverters[0].string10', 'inverters[0].string11', 'inverters[0].string12', 'inverters[0].string13', 'inverters[0].string14', 'meters[0].meter_reactive_power', 'meters[0].meter_apparent_power']
+
+==================================================
+
+Analyzing d:\Aubegine\csv_files\weatherHistory.csv...
+Total columns: 12
+Column Names: ['Formatted Date', 'Summary', 'Precip Type', 'Temperature (C)', 'Apparent Temperature (C)', 'Humidity', 'Wind Speed (km/h)', 'Wind Bearing (degrees)', 'Visibility (km)', 'Loud Cover', 'Pressure (millibars)', 'Daily Summary']
+
+First row sample:
+Formatted Date                  2006-04-01 00:00:00.000 +0200
+Summary                                         Partly Cloudy
+Precip Type                                              rain
+Temperature (C)                                      9.472222
+Apparent Temperature (C)                             7.388889
+Humidity                                                 0.89
+Wind Speed (km/h)                                     14.1197
+Wind Bearing (degrees)                                  251.0
+Visibility (km)                                       15.8263
+Loud Cover                                                0.0
+Pressure (millibars)                                  1015.13
+Daily Summary               Partly cloudy throughout the day.
+
+Numeric columns count: 8
+Numeric columns: ['Temperature (C)', 'Apparent Temperature (C)', 'Humidity', 'Wind Speed (km/h)', 'Wind Bearing (degrees)', 'Visibility (km)', 'Loud Cover', 'Pressure (millibars)']

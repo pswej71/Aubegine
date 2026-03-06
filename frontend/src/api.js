@@ -2,27 +2,27 @@ import axios from 'axios';
 
 const API_URL = 'http://localhost:8000/api';
 
-export const getLatestTelemetry = async () => {
-  const response = await axios.get(`${API_URL}/inverter/latest`);
+export const getLatestTelemetry = async (mac = 'DEMO-001') => {
+  const response = await axios.get(`${API_URL}/predict?mac=${mac}`);
   return response.data;
 };
 
-export const getHistory = async (limit = 100) => {
-  const response = await axios.get(`${API_URL}/inverter/history?limit=${limit}`);
+export const getAlerts = async (mac = 'DEMO-001') => {
+  const response = await axios.get(`${API_URL}/alerts?mac=${mac}`);
   return response.data;
 };
 
-export const getAlerts = async () => {
-  const response = await axios.get(`${API_URL}/alerts`);
+export const getGenAIAnalysis = async (mac = 'DEMO-001') => {
+  const response = await axios.get(`${API_URL}/genai-analysis?mac=${mac}`);
   return response.data;
 };
 
-export const getAISuggestions = async () => {
-  const response = await axios.get(`${API_URL}/ai/suggestions`);
+export const getExternalWeather = async () => {
+  const response = await axios.get(`${API_URL}/external-weather`);
   return response.data;
 };
 
-export const simulateData = async () => {
-  const response = await axios.post(`${API_URL}/simulator/generate`);
+export const postTelemetry = async (payload) => {
+  const response = await axios.post(`${API_URL}/inverter/telemetry`, payload);
   return response.data;
 };
