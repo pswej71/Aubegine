@@ -13,11 +13,15 @@ class InverterData(Base):
     ac_voltage = Column(Float)
     ac_current = Column(Float)
     grid_voltage = Column(Float)
+    grid_frequency = Column(Float)
     power_output = Column(Float)
     temperature = Column(Float)
+    heat_sink_temperature = Column(Float)
+    efficiency = Column(Float)
+    power_factor = Column(Float)
+    runtime_hours = Column(Float)
     load_percentage = Column(Float)
     fault_code = Column(Integer)
-    runtime_hours = Column(Float)
 
 class EnvironmentData(Base):
     __tablename__ = "environment_data"
@@ -28,6 +32,8 @@ class EnvironmentData(Base):
     humidity = Column(Float)
     wind_speed = Column(Float)
     dust_density = Column(Float)
+    panel_soiling_index = Column(Float)
+    cloud_cover = Column(Float)
     air_quality_index = Column(Float)
 
 class Prediction(Base):
@@ -40,6 +46,7 @@ class Prediction(Base):
     failure_probability = Column(Float)
     risk_level = Column(String) # Low, Medium, High
     model_type = Column(String) # Internal, Combined
+    rca_json = Column(String) # For GenAI explanation
 
 class Alert(Base):
     __tablename__ = "alerts"
@@ -56,4 +63,4 @@ class AnomalyLog(Base):
     mac = Column(String, index=True)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
     anomaly_score = Column(Float)
-    feature_impact = Column(String) # JSON string of high-impact features
+    is_anomaly = Column(Boolean, default=False)

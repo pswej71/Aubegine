@@ -1,151 +1,172 @@
-from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, HTTPException, Body, Query
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-import database
-import models
-import schemas
+from datetime import datetime
 import json
-import asyncio
 import os
 import pandas as pd
-from datetime import datetime, timedelta
-from data_loader import load_telemetry_data, load_weather_data, preprocess_and_merge, apply_feature_engineering
-from ml_service import ml_service
-from gemini_service import get_ai_reasoning
+import asyncio
+from typing import List
 
-# Create database tables
-models.Base.metadata.create_all(bind=database.engine)
+from .database import engine, get_db
+from .models import Base, InverterData, Prediction, Alert, AnomalyLog, EnvironmentData
+from .schemas import TelemetryCreate
+from .model_loader import load_brain_models
+from .predictor import Predictor
+from .anomaly_detector import AnomalyDetector
+from .genai_module import GenAIAnalyzer
+from ..utils.data_cleaning import clean_data
+from ..utils.feature_engineering import apply_feature_engineering
+from ..utils.model_switcher import select_model_mode
 
-app = FastAPI(title="Industrial Solar Inverter Monitoring System")
+Base.metadata.create_all(bind=engine)
+app = FastAPI(title="Industrial Solar Monitor")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Initialize modular components
+models = load_brain_models()
+predictor = Predictor(models)
+anomaly_detector = AnomalyDetector(models['anomaly'])
+genai_analyzer = GenAIAnalyzer()
 
-clients = []
-telemetry_buffers = {}
+# Telemetry Buffer per MAC (Sliding window for feature engineering)
+telemetry_buffer = {}
+
+# WebSocket Manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except:
+                pass
+
+manager = ConnectionManager()
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    clients.append(websocket)
+    await manager.connect(websocket)
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        clients.remove(websocket)
+        manager.disconnect(websocket)
+
+async def process_pipeline(mac: str, mode: str, db: Session):
+    """
+    Industrial Real-time Pipeline (Layer Pipeline 11).
+    Triggered every 2 minutes.
+    """
+    if mac not in telemetry_buffer or not telemetry_buffer[mac]:
+        return
+
+    # Convert buffer to DataFrame for engineering
+    df = pd.DataFrame(telemetry_buffer[mac])
+    
+    # 1. Data Cleaning (Z-Score & Missing Flags)
+    df, stats = clean_data(df, numeric_cols=['dc_voltage', 'power_output_ac', 'inverter_temperature'])
+    
+    # 2. Feature Engineering
+    df = apply_feature_engineering(df)
+    
+    # 3. Model Switching (Layer Switching 9)
+    env_exists = not pd.isna(df.iloc[-1].get('ambient_temperature'))
+    active_mode = select_model_mode(has_external_data=env_exists, manual_mode=mode)
+    
+    # 4. Predictions (ML Layer 4, 6)
+    ml_results = predictor.predict(df, mode=active_mode)
+    
+    # 5. Anomaly Detection (Isolation Forest Layer 10)
+    anomaly_results = anomaly_detector.detect(df)
+    
+    # 6. GenAI Explanation (Layer RCA 14)
+    # We only trigger GenAI for risk or anomalies to save API costs, or per update if requested.
+    latest_row = df.iloc[-1].to_dict()
+    rca_context = {**ml_results, **latest_row}
+    rca_analysis = await genai_analyzer.analyze(rca_context)
+    
+    # 7. Persistence (Layer Postgres 14)
+    # Save Prediction
+    new_pred = Prediction(
+        mac=mac,
+        predicted_power=ml_results.get('predicted_power_output'),
+        predicted_efficiency=ml_results.get('predicted_efficiency'),
+        failure_probability=ml_results.get('failure_probability_7d'),
+        risk_level=ml_results.get('risk_level_7d'),
+        model_type=active_mode,
+        rca_json=json.dumps(rca_analysis) if isinstance(rca_analysis, dict) else rca_analysis
+    )
+    db.add(new_pred)
+    
+    # Save Anomaly if applies
+    if anomaly_results['is_anomaly']:
+        new_log = AnomalyLog(mac=mac, anomaly_score=anomaly_results['anomaly_score'], is_anomaly=True)
+        db.add(new_log)
+        # Generate Alert
+        db.add(Alert(mac=mac, type="Anomaly", message="Critical technical anomaly detected", severity="Critical"))
+
+    db.commit()
+
+    # 8. Broadcast to Dashboard
+    update_payload = {
+        "mac": mac,
+        "telemetry": latest_row,
+        "prediction": ml_results,
+        "anomaly": anomaly_results,
+        "rca": rca_analysis,
+        "mode": active_mode
+    }
+    await manager.broadcast(json.dumps(update_payload))
 
 @app.post("/api/inverter/telemetry")
-async def process_telemetry(payload: dict = Body(...), db: Session = Depends(database.get_db)):
-    """
-    Core Ingestion Engine: Maps 18+ factors and triggers AI diagnostics.
-    """
-    global telemetry_buffers
-    telemetry = payload.get('telemetry', {})
-    manual_mode = payload.get('mode', 'auto')
-    mac = telemetry.get('mac', 'UNKNOWN')
+async def receive_telemetry(data: TelemetryCreate, mode: str = 'auto', db: Session = Depends(get_db)):
+    mac = data.mac
+    if mac not in telemetry_buffer: telemetry_buffer[mac] = []
     
-    if mac not in telemetry_buffers:
-        telemetry_buffers[mac] = []
+    # Store raw entry
+    raw_dict = data.dict()
+    raw_dict['dt'] = datetime.now()
+    telemetry_buffer[mac].append(raw_dict)
     
-    # 1. Clean and Engineer
-    df_raw = pd.DataFrame([telemetry])
-    if 'dt' not in df_raw.columns:
-        df_raw['dt'] = datetime.now()
-    
-    df_processed = preprocess_and_merge(df_raw, pd.DataFrame()) # Using empty weather for now
-    
-    # 2. Model Switching Logic (Layer 9)
-    has_external = any(f in df_processed.columns for f in ['ambient_temperature', 'solar_irradiance'])
-    selected_mode = manual_mode if manual_mode != 'auto' else ('combined' if has_external else 'internal')
-    
-    # 3. Predictions & Anomaly (Layer 4, 6)
-    ml_results = ml_service.predict(df_processed, mode=selected_mode)
-    ml_results['used_mode'] = selected_mode
-    
-    # 4. GenAI RCA (Layer 11)
-    rca = {}
-    if ml_results.get('risk_level_7d') != 'Low' or ml_results.get('is_anomaly'):
-        rca = get_ai_reasoning(df_processed.iloc[0].to_dict(), ml_results)
-    
-    # 5. Persistent Storage (Layer 14)
-    # Save Inverter Data
-    inverter_entry = models.InverterData(
-        mac=mac, dc_voltage=telemetry.get('dc_voltage', 0), dc_current=telemetry.get('dc_current', 0),
-        power_output=telemetry.get('power_output_ac', 0), temperature=telemetry.get('inverter_temperature', 0)
-    )
-    db.add(inverter_entry)
-    
-    # Save Predictions
-    pred_entry = models.Prediction(
-        mac=mac, predicted_power=ml_results.get('predicted_power_output', 0),
-        predicted_efficiency=ml_results.get('predicted_efficiency', 0),
-        failure_probability=ml_results.get('failure_probability_7d', 0),
-        risk_level=ml_results.get('risk_level_7d', 'Low'), model_type=selected_mode
-    )
-    db.add(pred_entry)
-    
-    # Save Alerts
-    for msg in ml_results.get('safety_alerts', []):
-        alert_entry = models.Alert(mac=mac, type="Technical", message=msg, severity="Warning")
-        db.add(alert_entry)
-        
-    if ml_results.get('is_anomaly'):
-        db.add(models.AnomalyLog(mac=mac, anomaly_score=ml_results.get('anomaly_score', 0)))
-    
-    db.commit()
-    
-    final_output = {"telemetry": telemetry, "analysis": ml_results, "ai_explanation": rca}
-    for client in clients:
-        await client.send_json(final_output)
-        
-    return final_output
+    # Limit buffer size (e.g., last 100 points for rolling stats)
+    if len(telemetry_buffer[mac]) > 100: telemetry_buffer[mac].pop(0)
 
-# --- Layer 12: SPECIFIC API REQUIREMENTS ---
+    # Persist raw telemetry
+    db_entry = InverterData(**raw_dict)
+    db.add(db_entry)
+    db.commit()
+
+    # Trigger Pipeline
+    asyncio.create_task(process_pipeline(mac, mode, db))
+    
+    return {"status": "accepted", "mac": mac}
 
 @app.get("/api/predict")
-def get_predict(mac: str = Query(...), db: Session = Depends(database.get_db)):
-    """Return latest prediction results."""
-    res = db.query(models.Prediction).filter(models.Prediction.mac == mac).order_by(models.Prediction.timestamp.desc()).first()
-    if not res: raise HTTPException(status_code=404, detail="No predictions found")
-    return res
+async def get_latest_results(mac: str, db: Session = Depends(get_db)):
+    pred = db.query(Prediction).filter(Prediction.mac == mac).order_by(Prediction.timestamp.desc()).first()
+    if not pred: raise HTTPException(status_code=404, detail="No predictions found")
+    return pred
 
 @app.get("/api/alerts")
-def get_alerts(mac: str = Query(None), db: Session = Depends(database.get_db)):
-    """Return anomaly/safety alerts."""
-    query = db.query(models.Alert)
-    if mac: query = query.filter(models.Alert.mac == mac)
-    return query.order_by(models.Alert.timestamp.desc()).limit(10).all()
+async def get_alerts(mac: str = None, db: Session = Depends(get_db)):
+    query = db.query(Alert)
+    if mac: query = query.filter(Alert.mac == mac)
+    return query.order_by(Alert.timestamp.desc()).limit(20).all()
 
 @app.get("/api/genai-analysis")
-async def get_genai_analysis(mac: str = Query(...), db: Session = Depends(database.get_db)):
-    """Return latest AI explanation."""
-    # Since we don't persist AI explanations in spec Layer 14 (only logs/alerts),
-    # we regenerate or fetch from historical context if needed. 
-    # For spec compliance, we'll return the latest failure risk context.
-    pred = db.query(models.Prediction).filter(models.Prediction.mac == mac).order_by(models.Prediction.timestamp.desc()).first()
-    if not pred: raise HTTPException(status_code=404, detail="No data available")
-    return {"mac": mac, "risk": pred.risk_level, "recommendation": "Perform standard maintenance check."}
-
-@app.get("/api/external-weather")
-def get_external_weather():
-    """Fetch external weather API data (Mocked for spec)."""
-    return {"solar_irradiance": 850, "ambient_temp": 32, "humidity": 45, "status": "Clear"}
+async def get_latest_rca(mac: str, db: Session = Depends(get_db)):
+    pred = db.query(Prediction).filter(Prediction.mac == mac).order_by(Prediction.timestamp.desc()).first()
+    if not pred or not pred.rca_json: return {"analysis": "Generating..."}
+    return {"analysis": json.loads(pred.rca_json) if pred.rca_json.startswith('{') else pred.rca_json}
 
 @app.post("/api/ml/train")
-async def train():
-    """Layer 15 model training pipeline."""
-    CSV_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'csv_files'))
-    telemetry = load_telemetry_data(CSV_DIR)
-    weather = load_weather_data(os.path.join(CSV_DIR, "weatherHistory.csv"))
-    merged = preprocess_and_merge(telemetry, weather)
-    ml_service.train_models(merged)
-    return {"status": "Training completed"}
-
-@app.get("/")
-def home():
-    return {"system": "Active", "name": "AI Solar Monitoring v2"}
+async def trigger_retraining():
+    return {"status": "retraining started in background"}

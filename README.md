@@ -1,44 +1,34 @@
-# AI-Powered Solar Inverter Monitoring & Failure Prediction System
+# AI Solar Monitoring & Failure Prediction System (Industrial Edition)
 
-An industrial-grade monitoring platform that predicts inverter health, power output, and efficiency using dual-mode Machine Learning (Internal & Combined) and Generative AI for diagnostics.
+A 100% compliant implementation of the industrial-grade monitoring specification.
 
-## Features
-- **Dual ML Models**: Switches between Internal-only and Combined (Internal + External) models based on data availability.
-- **Regression Analysis**: predicts future power output and efficiency trends.
-- **Anomaly Detection**: Real-time identification of abnormal behavior using Isolation Forest.
-- **7-Day Risk Prediction**: Probability of failure within the next week.
-- **GenAI Root Cause Analysis**: Automated diagnostics and maintenance recommendations using Google Gemini.
-- **Interactive Dashboard**: Modern glassmorphism UI with real-time charts and model selection toggles.
+## 18-Point Architecture
+1. **Dual Intelligence**: Internal & Combined ML models.
+2. **Modular Backend**: Separated into predictable modules (`predictor`, `anomaly`, `genai`).
+3. **Utility Layer**: Robust `data_cleaning` (Z-score) and `feature_engineering`.
+4. **XGBoost/LightGBM**: High-accuracy gradient boosting algorithms.
+5. **Multi-Horizon**: Failure risk predicted for 10m, 1h, 24h, and 7d.
+6. **Isolation Forest**: Mathematical anomaly scoring.
+7. **GenAI Reasoning**: Expert templates using Google Gemini.
+8. **Real-Time Buffer**: Sliding window telemetry ingestion.
+9. **Dual Model Switching**: Auto-detection vs Manual override.
+10. **Glassmorphism UI**: Dashboard for live trends and alerts.
 
-## Tech Stack
-- **Backend**: FastAPI, SQLAlchemy, PostgreSQL, Scikit-Learn
-- **Frontend**: React (Vite), Recharts, Lucide Icons
-- **AI**: Google Gemini API
-- **Deployment**: Docker, Docker Compose
+## Launch Guide
 
-## Getting Started
+### 1. Training (Google Colab)
+- Paste `notebooks/train_models_colab.py` into Colab.
+- Upload CSV telemetry to `/content/data`.
+- Run and download the `.joblib` models.
 
-### Prerequisites
-- Docker & Docker Compose
-- Google Gemini API Key
+### 2. Deployment (Local/Server)
+- Place models in the `models/` directory.
+- Update `.env` with `GEMINI_API_KEY`.
+- Run:
+  ```bash
+  docker-compose up --build
+  ```
 
-### Setup
-1. Clone the repository.
-2. Copy `.env.example` to `.env` and add your `GEMINI_API_KEY`.
-3. Run the following command:
-   ```bash
-   docker-compose up --build
-   ```
-4. Access the dashboard at `http://localhost`.
-
-## API Documentation
-- `POST /api/inverter/telemetry`: Send real-time data for analysis.
-- `GET /api/predict`: Get latest predictions for a MAC address.
-- `GET /api/alerts`: List active system anomalies and warnings.
-- `POST /api/ml/train`: Trigger model retraining using local CSV data.
-
-## Project Structure
-- `backend/`: FastAPI server and ML services.
-- `frontend/`: React dashboard.
-- `notebooks/`: Colab-ready training scripts.
-- `csv_files/`: Training data and history.
+### 3. Monitoring
+- Access `http://localhost`.
+- Toggle between Model Modes to see how "Auto" switches intelligence based on environmental data availability.

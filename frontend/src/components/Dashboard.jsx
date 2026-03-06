@@ -54,25 +54,63 @@ const Dashboard = () => {
     };
 
     useEffect(() => {
+        const socket = new WebSocket('ws://localhost:8000/ws');
+
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.mac === 'DEMO-001') {
+                setLatestData({
+                    prediction: data.prediction,
+                    anomaly: data.anomaly,
+                    rca: data.rca,
+                    telemetry: data.telemetry,
+                    timeLabel: format(new Date(), 'HH:mm:ss')
+                });
+
+                setHistoricalData(prev => {
+                    const updated = [...prev, {
+                        ...data.prediction,
+                        ...data.telemetry,
+                        timeLabel: format(new Date(), 'HH:mm:ss')
+                    }];
+                    return updated.slice(-30);
+                });
+            }
+        };
+
+        return () => socket.close();
+    }, []);
+
+    // Initial load and simulation
+    useEffect(() => {
         refreshSystemState();
-        const interval = setInterval(() => {
+        const simulator = setInterval(() => {
             const mockTelemetry = {
                 mac: 'DEMO-001',
                 dc_voltage: 480 + Math.random() * 20,
                 dc_current: 10 + Math.random() * 2,
+                ac_voltage: 230 + Math.random() * 5,
+                ac_current: 15 + Math.random() * 3,
+                grid_voltage: 230 + Math.random() * 2,
                 power_output_ac: 4500 + Math.random() * 1000,
-                inverter_temperature: 40 + Math.random() * 15
+                inverter_temperature: 40 + Math.random() * 15,
+                ambient_temperature: 25 + Math.random() * 5,
+                solar_irradiance: 800 + Math.random() * 200
             };
 
-            postTelemetry({ telemetry: mockTelemetry, mode: modelMode })
-                .then(() => refreshSystemState());
-        }, 5000);
-        return () => clearInterval(interval);
+            postTelemetry(mockTelemetry, modelMode);
+        }, 10000); // Push every 10s for demo
+        return () => clearInterval(simulator);
     }, [modelMode]);
 
     const latest = latestData.prediction || {};
-    const alerts = latestData.alerts || [];
     const rca = latestData.rca || {};
+
+    // Parse RCA if it's a string
+    let parsedRCA = rca;
+    if (typeof rca === 'string' && rca.startsWith('{')) {
+        try { parsedRCA = JSON.parse(rca); } catch (e) { }
+    }
 
     return (
         <div className="main-content">
@@ -187,7 +225,7 @@ const Dashboard = () => {
                         </h3>
                         {loading ? (
                             <p style={{ color: 'var(--text-secondary)' }}>Processing telemetry...</p>
-                        ) : rca.risk ? (
+                        ) : parsedRCA.detected_issue ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                                     <span className={`badge ${latest.risk_level === 'Low' ? 'badge-success' : 'badge-danger'}`}>
@@ -195,11 +233,22 @@ const Dashboard = () => {
                                     </span>
                                 </div>
                                 <div style={{ background: 'rgba(59, 130, 246, 0.1)', padding: '1rem', borderRadius: '8px', borderLeft: '4px solid var(--accent-primary)' }}>
-                                    <h4 style={{ color: 'var(--accent-primary)', fontSize: '0.875rem', marginBottom: '0.25rem' }}>AI Recommendation</h4>
-                                    <p style={{ fontSize: '0.875rem' }}>{rca.recommendation}</p>
+                                    <h4 style={{ color: 'var(--accent-primary)', fontSize: '0.875rem', marginBottom: '0.5rem', fontWeight: 700 }}>{parsedRCA.detected_issue}</h4>
+
+                                    {parsedRCA.possible_causes && (
+                                        <div style={{ marginBottom: '0.5rem' }}>
+                                            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Possible Causes</p>
+                                            <ul style={{ fontSize: '0.875rem', paddingLeft: '1.2rem' }}>
+                                                {Array.isArray(parsedRCA.possible_causes) ? parsedRCA.possible_causes.map((c, i) => <li key={i}>{c}</li>) : <li>{parsedRCA.possible_causes}</li>}
+                                            </ul>
+                                        </div>
+                                    )}
+
+                                    <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Recommended Actions</p>
+                                    <p style={{ fontSize: '0.875rem' }}>{parsedRCA.recommended_maintenance_actions || parsedRCA.recommended_actions}</p>
                                 </div>
                             </div>
-                        ) : <p style={{ color: 'var(--text-secondary)' }}>Optimal operation detected.</p>}
+                        ) : <p style={{ color: 'var(--text-secondary)' }}>{typeof rca === 'string' ? rca : "Optimal operation detected."}</p>}
                     </div>
 
                     <div className="glass-card fade-in stagger-4">
@@ -208,12 +257,24 @@ const Dashboard = () => {
                             Real-Time Alerts
                         </h3>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                            {alerts.length > 0 ? alerts.map((alert, i) => (
-                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px' }}>
+                            {latestData.anomaly?.is_anomaly && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px', border: '1px solid var(--accent-danger)' }}>
                                     <AlertTriangle size={18} color="var(--accent-danger)" />
-                                    <div style={{ fontSize: '0.875rem' }}>{alert.message}</div>
+                                    <div>
+                                        <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Technical Anomaly Detected</div>
+                                        <div style={{ fontSize: '0.75rem', opacity: 0.8 }}>Score: {latestData.anomaly.anomaly_score}</div>
+                                    </div>
                                 </div>
-                            )) : <p style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>No active alerts.</p>}
+                            )}
+                            {latest.safety_alerts?.map((msg, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem', background: 'rgba(245, 158, 11, 0.1)', borderRadius: '8px' }}>
+                                    <Zap size={18} color="var(--accent-warning)" />
+                                    <div style={{ fontSize: '0.875rem' }}>{msg}</div>
+                                </div>
+                            ))}
+                            {!latestData.anomaly?.is_anomaly && (!latest.safety_alerts || latest.safety_alerts.length === 0) && (
+                                <p style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>No active alerts.</p>
+                            )}
                         </div>
                     </div>
                 </div>
