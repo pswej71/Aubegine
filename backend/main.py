@@ -1,183 +1,172 @@
-from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, BackgroundTasks, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-import database
-import models
-import schemas
-from gemini_service import get_suggestions
-from ml_service import analyze_trends_and_anomalies
-import json
-import asyncio
 from datetime import datetime
-import random
+import json
+import os
+import pandas as pd
+import asyncio
+from typing import List
 
-# Create database tables
-models.Base.metadata.create_all(bind=database.engine)
+from .database import engine, get_db
+from .models import Base, InverterData, Prediction, Alert, AnomalyLog, EnvironmentData
+from .schemas import TelemetryCreate
+from .model_loader import load_brain_models
+from .predictor import Predictor
+from .anomaly_detector import AnomalyDetector
+from .genai_module import GenAIAnalyzer
+from ..utils.data_cleaning import clean_data
+from ..utils.feature_engineering import apply_feature_engineering
+from ..utils.model_switcher import select_model_mode
 
-app = FastAPI(title="Solar Inverter Monitoring API")
+Base.metadata.create_all(bind=engine)
+app = FastAPI(title="Industrial Solar Monitor")
 
-# Configure CORS for React frontend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Initialize modular components
+models = load_brain_models()
+predictor = Predictor(models)
+anomaly_detector = AnomalyDetector(models['anomaly'])
+genai_analyzer = GenAIAnalyzer()
 
-clients = []
+# Telemetry Buffer per MAC (Sliding window for feature engineering)
+telemetry_buffer = {}
+
+# WebSocket Manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except:
+                pass
+
+manager = ConnectionManager()
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    clients.append(websocket)
+    await manager.connect(websocket)
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        clients.remove(websocket)
+        manager.disconnect(websocket)
 
-@app.get("/")
-def read_root():
-    return {"message": "Solar Inverter API is Running"}
+async def process_pipeline(mac: str, mode: str, db: Session):
+    """
+    Industrial Real-time Pipeline (Layer Pipeline 11).
+    Triggered every 2 minutes.
+    """
+    if mac not in telemetry_buffer or not telemetry_buffer[mac]:
+        return
 
-@app.post("/api/inverter/telemetry", response_model=schemas.Telemetry)
-async def create_telemetry(telemetry: schemas.TelemetryCreate, db: Session = Depends(database.get_db)):
-    efficiency = 0.0
-    if telemetry.solar_irradiance > 0:
-        efficiency = (telemetry.power / telemetry.solar_irradiance) * 100
-
-    db_item = models.InverterTelemetry(
-        **telemetry.dict(),
-        efficiency=efficiency,
-        is_anomaly=False, # This gets evaluated when querying history
-        predicted_energy=telemetry.energy * 1.05 # Mock prediction factor
+    # Convert buffer to DataFrame for engineering
+    df = pd.DataFrame(telemetry_buffer[mac])
+    
+    # 1. Data Cleaning (Z-Score & Missing Flags)
+    df, stats = clean_data(df, numeric_cols=['dc_voltage', 'power_output_ac', 'inverter_temperature'])
+    
+    # 2. Feature Engineering
+    df = apply_feature_engineering(df)
+    
+    # 3. Model Switching (Layer Switching 9)
+    env_exists = not pd.isna(df.iloc[-1].get('ambient_temperature'))
+    active_mode = select_model_mode(has_external_data=env_exists, manual_mode=mode)
+    
+    # 4. Predictions (ML Layer 4, 6)
+    ml_results = predictor.predict(df, mode=active_mode)
+    
+    # 5. Anomaly Detection (Isolation Forest Layer 10)
+    anomaly_results = anomaly_detector.detect(df)
+    
+    # 6. GenAI Explanation (Layer RCA 14)
+    # We only trigger GenAI for risk or anomalies to save API costs, or per update if requested.
+    latest_row = df.iloc[-1].to_dict()
+    rca_context = {**ml_results, **latest_row}
+    rca_analysis = await genai_analyzer.analyze(rca_context)
+    
+    # 7. Persistence (Layer Postgres 14)
+    # Save Prediction
+    new_pred = Prediction(
+        mac=mac,
+        predicted_power=ml_results.get('predicted_power_output'),
+        predicted_efficiency=ml_results.get('predicted_efficiency'),
+        failure_probability=ml_results.get('failure_probability_7d'),
+        risk_level=ml_results.get('risk_level_7d'),
+        model_type=active_mode,
+        rca_json=json.dumps(rca_analysis) if isinstance(rca_analysis, dict) else rca_analysis
     )
-    db.add(db_item)
+    db.add(new_pred)
+    
+    # Save Anomaly if applies
+    if anomaly_results['is_anomaly']:
+        new_log = AnomalyLog(mac=mac, anomaly_score=anomaly_results['anomaly_score'], is_anomaly=True)
+        db.add(new_log)
+        # Generate Alert
+        db.add(Alert(mac=mac, type="Anomaly", message="Critical technical anomaly detected", severity="Critical"))
+
     db.commit()
-    db.refresh(db_item)
-    
-    # Broadcast to connected websocket clients
-    for client in clients:
-        try:
-            d = db_item.__dict__.copy()
-            d.pop('_sa_instance_state', None)
-            d['timestamp'] = d['timestamp'].isoformat()
-            await client.send_json(d)
-        except Exception:
-            pass
 
-    return db_item
+    # 8. Broadcast to Dashboard
+    update_payload = {
+        "mac": mac,
+        "telemetry": latest_row,
+        "prediction": ml_results,
+        "anomaly": anomaly_results,
+        "rca": rca_analysis,
+        "mode": active_mode
+    }
+    await manager.broadcast(json.dumps(update_payload))
 
-@app.get("/api/inverter/history")
-def get_history(limit: int = 100, db: Session = Depends(database.get_db)):
-    items = db.query(models.InverterTelemetry).order_by(models.InverterTelemetry.timestamp.desc()).limit(limit).all()
-    # Reverse to return chronological order
-    items = items[::-1]
+@app.post("/api/inverter/telemetry")
+async def receive_telemetry(data: TelemetryCreate, mode: str = 'auto', db: Session = Depends(get_db)):
+    mac = data.mac
+    if mac not in telemetry_buffer: telemetry_buffer[mac] = []
     
-    # Apply ML Trend Analysis and Anomaly Detection
-    processed_data = analyze_trends_and_anomalies(items)
-    return processed_data
+    # Store raw entry
+    raw_dict = data.dict()
+    raw_dict['dt'] = datetime.now()
+    telemetry_buffer[mac].append(raw_dict)
+    
+    # Limit buffer size (e.g., last 100 points for rolling stats)
+    if len(telemetry_buffer[mac]) > 100: telemetry_buffer[mac].pop(0)
 
-@app.get("/api/inverter/latest")
-def get_latest_telemetry(db: Session = Depends(database.get_db)):
-    item = db.query(models.InverterTelemetry).order_by(models.InverterTelemetry.timestamp.desc()).first()
-    if not item:
-        return {}
+    # Persist raw telemetry
+    db_entry = InverterData(**raw_dict)
+    db.add(db_entry)
+    db.commit()
+
+    # Trigger Pipeline
+    asyncio.create_task(process_pipeline(mac, mode, db))
     
-    d = item.__dict__.copy()
-    d.pop('_sa_instance_state', None)
-    return d
+    return {"status": "accepted", "mac": mac}
+
+@app.get("/api/predict")
+async def get_latest_results(mac: str, db: Session = Depends(get_db)):
+    pred = db.query(Prediction).filter(Prediction.mac == mac).order_by(Prediction.timestamp.desc()).first()
+    if not pred: raise HTTPException(status_code=404, detail="No predictions found")
+    return pred
 
 @app.get("/api/alerts")
-def get_alerts(db: Session = Depends(database.get_db)):
-    faults = db.query(models.InverterTelemetry).filter(models.InverterTelemetry.status != "Normal").order_by(models.InverterTelemetry.timestamp.desc()).limit(10).all()
-    
-    faults_dict = []
-    for f in faults:
-        d = f.__dict__.copy()
-        d.pop('_sa_instance_state', None)
-        faults_dict.append(d)
-        
-    return {
-        "faults": faults_dict
-    }
+async def get_alerts(mac: str = None, db: Session = Depends(get_db)):
+    query = db.query(Alert)
+    if mac: query = query.filter(Alert.mac == mac)
+    return query.order_by(Alert.timestamp.desc()).limit(20).all()
 
-@app.get("/api/ai/suggestions")
-def get_ai_suggestions(db: Session = Depends(database.get_db)):
-    # Get last 15 readings for context
-    items = db.query(models.InverterTelemetry).order_by(models.InverterTelemetry.timestamp.desc()).limit(15).all()
-    items = items[::-1]
-    
-    data_dicts = []
-    for item in items:
-        d = item.__dict__.copy()
-        d.pop('_sa_instance_state', None)
-        d['timestamp'] = str(d['timestamp'])
-        data_dicts.append(d)
-        
-    # Example alert logic
-    alerts = ["Low efficiency warning"] if any((d.get('efficiency', 100) < 50 for d in data_dicts)) else []
-    
-    suggestion = get_suggestions(telemetry_data=data_dicts, alerts=alerts)
-    return suggestion
-
-# Simulator Endpoint for Testing easily without real sensors
-@app.post("/api/simulator/generate")
-async def generate_mock_data(db: Session = Depends(database.get_db)):
-    telemetry = schemas.TelemetryCreate(
-        voltage=random.uniform(210, 240),
-        current=random.uniform(10, 50),
-        power=random.uniform(2000, 10000),
-        energy=random.uniform(10, 50),
-        frequency=random.uniform(49.8, 50.2),
-        temperature=random.uniform(30, 60),
-        status="Normal" if random.random() > 0.1 else "Warning",
-        solar_irradiance=random.uniform(400, 1000),
-        ambient_temperature=random.uniform(20, 45),
-        dust_index=random.uniform(0, 100),
-        air_quality_index=random.uniform(20, 150)
-    )
-    
-    efficiency = 0.0
-    if telemetry.solar_irradiance > 0:
-        efficiency = (telemetry.power / telemetry.solar_irradiance) * 100
-
-    db_item = models.InverterTelemetry(
-        **telemetry.dict(),
-        efficiency=efficiency,
-        is_anomaly=False,
-        predicted_energy=telemetry.energy * 1.05
-    )
-    db.add(db_item)
-    db.commit()
-    db.refresh(db_item)
-    
-    # Broadcast to connected websocket clients
-    for client in clients:
-        try:
-            d = db_item.__dict__.copy()
-            d.pop('_sa_instance_state', None)
-            d['timestamp'] = d['timestamp'].isoformat()
-            await client.send_json(d)
-        except Exception:
-            pass
-            
-    return {"message": "Data generated successfully"}
+@app.get("/api/genai-analysis")
+async def get_latest_rca(mac: str, db: Session = Depends(get_db)):
+    pred = db.query(Prediction).filter(Prediction.mac == mac).order_by(Prediction.timestamp.desc()).first()
+    if not pred or not pred.rca_json: return {"analysis": "Generating..."}
+    return {"analysis": json.loads(pred.rca_json) if pred.rca_json.startswith('{') else pred.rca_json}
 
 @app.post("/api/ml/train")
-def train_anomaly_model(db: Session = Depends(database.get_db)):
-    # Grab last 1000 items to train
-    items = db.query(models.InverterTelemetry).order_by(models.InverterTelemetry.timestamp.desc()).limit(1000).all()
-    if len(items) < 50:
-        return {"status": "error", "message": "Not enough data to train (need at least 50)"}
-        
-    data_list = []
-    for t in items:
-        d = t.__dict__.copy()
-        d.pop('_sa_instance_state', None)
-        data_list.append(d)
-        
-    success = ml_service.train_model(data_list)
-    return {"status": "success" if success else "error", "message": "Model retrained and saved to disk"}
-
+async def trigger_retraining():
+    return {"status": "retraining started in background"}

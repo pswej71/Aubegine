@@ -1,53 +1,61 @@
 import os
 import google.generativeai as genai
+import json
 
-def get_suggestions(telemetry_data: list, alerts: list):
+def get_ai_reasoning(telemetry_row: dict, prediction_results: dict):
+    """
+    Generate Root Cause Analysis (RCA) and maintenance recommendations using Gemini.
+    """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key or api_key == "your_gemini_api_key_here":
         return {
-            "insight": "Gemini API key not configured.",
-            "recommendation": "Please add a valid GEMINI_API_KEY to your backend/.env file to enable AI insights.",
-            "severity": "Info",
-            "trend": "Unknown"
+            "warning": "System Alert",
+            "possible_reasons": ["AI Service Disconnected"],
+            "recommended_actions": ["Configure GEMINI_API_KEY in .env"]
         }
     
     genai.configure(api_key=api_key)
-    # Use gemini-1.5-flash for faster responses
     model = genai.GenerativeModel('gemini-1.5-flash')
     
+    # Context for the AI
+    context = {
+        "current_state": telemetry_row,
+        "prediction_results": prediction_results
+    }
+    
     prompt = f"""
-    You are an expert Solar Inverter AI analytics assistant. 
-    Analyze the following recent telemetry data and alerts for a solar inverter system.
+    You are an Industrial Solar Inverter Diagnostic AI. 
+    Analyze the current system state and ML prediction results to provide a Root Cause Analysis (RCA).
     
-    Recent Alerts:
-    {alerts}
+    Current Data: {json.dumps(telemetry_row)}
+    ML Predictions: {json.dumps(prediction_results)}
     
-    Provide your response in strict JSON format with the exact following keys:
-    "insight": A brief analysis of the current state.
-    "recommendation": Actionable advice for the user (e.g. "Clean solar panels" if dust index is high and efficiency is dropping).
-    "severity": 'Low', 'Medium', 'High', or 'Critical'.
-    "trend": A short sentence describing the performance trend based on power and efficiency.
+    Generate a diagnostic report in STRICT JSON format with these exact keys:
+    - "warning": A clear header (e.g., "Potential Thermal Stress", "Grid Instability Detected").
+    - "possible_reasons": A list of technical reasons (e.g., ["Dust accumulation", "High ambient temp"]).
+    - "recommended_actions": A list of specific maintenance steps.
     
-    Do not include markdown or backticks (```json) in the response, just return the raw parseable JSON object.
+    Logic Guidelines:
+    1. If anomaly_score is high or risk_level is Medium/High, be more critical.
+    2. Look for patterns:
+       - High temp + Efficiency drop -> Thermal issues or cooling failure.
+       - High humidity + Grid fluctuation -> Insulation or grid stability.
+       - Power output = 0 during daylight -> Inverter fault or disconnection.
     
-    Data summary (length={len(telemetry_data)}):
-    {str(telemetry_data)[:1000]} # Trimmed to avoid token limits if too long
+    Only return raw JSON. No markdown.
     """
     
     try:
         response = model.generate_content(prompt)
         text = response.text.strip()
-        if text.startswith("```json"):
-            text = text[7:-3].strip()
-        elif text.startswith("```"):
-            text = text[3:-3].strip()
-            
-        import json
+        # Clean up possible markdown wrapping
+        if text.startswith("```json"): text = text[7:-3].strip()
+        elif text.startswith("```"): text = text[3:-3].strip()
+        
         return json.loads(text)
     except Exception as e:
         return {
-            "insight": "Failed to generate AI suggestion.",
-            "recommendation": str(e),
-            "severity": "Error",
-            "trend": "Unknown"
+            "warning": "Diagnostic Error",
+            "possible_reasons": ["AI processing failed"],
+            "recommended_actions": ["Check system logs", str(e)]
         }
